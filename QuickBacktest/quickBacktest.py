@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 import quantstats as qs
-from QuickBacktest import Yahoo as yh
+from QuickBacktest import yh
 
 
 class BacktestResult:
