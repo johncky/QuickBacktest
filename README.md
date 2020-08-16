@@ -5,6 +5,8 @@ Automatically download data from Yahoo Finance, backtest strategy, and produce p
 
 # Example
 ```python
+    import quickBacktest
+    
     # states are preserved in loop
     # put your variables/objects inside states
     # cash, quantity, trade price, trade date are preserved names in states
@@ -35,7 +37,7 @@ Automatically download data from Yahoo Finance, backtest strategy, and produce p
     # tickers to backtest
     tickers = ['FB', 'AMZN', 'AAPL', 'GOOG']
 
-    result = backtest(tickers=tickers,
+    result = quickBacktest.backtest(tickers=tickers,
                         capital=1000000,
                         strategy_func=sma_crossover_signal, 
                         start_date="2015-01-01",
@@ -64,9 +66,26 @@ Automatically download data from Yahoo Finance, backtest strategy, and produce p
 ```
 
 ### Signals
-1. LONG: buy min(x, max affordable qty) qty
-2. COVER AND LONG: cover short position, and buy min(x, max affordable qty) qty
-3. SHORT: short sell max(x, max qty to short) qty; max qty to short = int((cash + equity value) / trade price)
-4. EXIT AND SHORT: exit long position, and short sell max(x, max qty to short) qty
+1. LONG: buy minimum(x, max affordable qty) qty
+2. COVER AND LONG: cover short position, and buy minimum(x, max affordable qty) qty
+3. SHORT: short sell maximum(x, max qty to short) qty; max qty to short = int((cash + equity value) / trade price)
+4. EXIT AND SHORT: exit long position, and short sell maximum(x, max qty to short) qty
 5. LIQUIDATE: liquidate position, hold cash
+
+### Quantity
+1. ALL: maximum affordable quantity
+2. int: int quantity to buy
+3. %: 
+```python
+# use this to convert % invested to corresponding signal and quantity to trade
+signal, qty = quickBacktest.convert_percent_to_qty(percentage, cur_cash, cur_qty, trade_price)
+
+# for example, if you are currently 15% in stock, and you want to calculate
+# the signal and qty required to be 35% invested in stock based on your current cash and quantity: 
+signal, qty = quickBacktest.convert_percent_to_qty(percentage=0.35,
+                                                    states['cash'], 
+                                                    states['quantity'],
+                                                    states['trade_price'])
+# this would return ("LONG", quantity required to buy on top of current qty)
+```
 
