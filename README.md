@@ -49,7 +49,7 @@ Automatically download data from Yahoo Finance, backtest strategy, and produce p
                         max_rows=None)
                       
     # if "allocations" is not specified, default equal weightings
-    # performance report of a portfolio where 25% of capital is invested in each ticker
+    # performance report of a portfolio that invested 25% of capital in each ticker
     result.portfolio_report(benchmark="^IXIC", allocations=[0.25,0.25,0.25,0.25])
 
     # stats of all tickers
