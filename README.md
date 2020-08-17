@@ -52,25 +52,13 @@ Automatically download data from Yahoo Finance, backtest strategy, and produce p
 ```
 
 ### Trade functions
-1. long: buy minimum(x, max affordable qty) qty
+1. long: buy minimum(x, max affordable qty) qty, buy max amount when qty = None
 2. exit_long: sell stocks to cover long position
-3. cover_and_long: cover short position, and buy minimum(x, max affordable qty) qty
-4. short: short sell maximum(x, max qty to short) qty; max qty to short = int((cash + equity value) / trade price)
+3. cover_and_long: cover short position, and buy minimum(x, max affordable qty) qty, buy max amount when qty = None
+4. short: short sell maximum(x, max qty to short) qty; max qty to short = int((cash + equity value) / trade price), short max amount when qty = None
 5. cover_short: buy stocks to cover short position
-6. exit_and_short: exit long position, and short sell maximum(x, max qty to short) qty
+6. exit_and_short: exit long position, and short sell maximum(x, max qty to short) qty, short max amount when qty = None
 7. liquidate: liquidate position, hold cash
 
 
-```python
-# use this to convert % invested to corresponding signal and quantity to trade
-signal, qty = quickBacktest.convert_percent_to_qty(percentage, cur_cash, cur_qty, trade_price)
-
-# for example, if you are currently 15% in stock, and you want to calculate
-# the signal and qty required to be 35% invested in stock based on your current cash and quantity: 
-signal, qty = quickBacktest.convert_percent_to_qty(percentage=0.35,
-                                                    states['cash'], 
-                                                    states['quantity'],
-                                                    states['trade_price'])
-# this would return ("LONG", quantity required to buy on top of current qty)
-```
 
