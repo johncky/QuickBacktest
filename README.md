@@ -7,10 +7,6 @@ Automatically download data from Yahoo Finance, backtest strategy, and produce p
 ```python
     from quickBacktest import Strategy
     
-    # states are preserved in loop
-    # put your variables/objects inside states
-    # cash, quantity, trade price, trade date are preserved names in states
-    # cash: current cash; quantity: current quantity; 
     class SMA(Strategy):
         def init(self):
             self.data['sma16'] = self.data['adjclose'].rolling(16).mean()
