@@ -51,17 +51,16 @@ Automatically download data from Yahoo Finance, backtest strategy, and produce p
     trade_df = result.all_results['FB'].trade_df
 ```
 
-### Signals
-1. LONG: buy minimum(x, max affordable qty) qty
-2. COVER AND LONG: cover short position, and buy minimum(x, max affordable qty) qty
-3. SHORT: short sell maximum(x, max qty to short) qty; max qty to short = int((cash + equity value) / trade price)
-4. EXIT AND SHORT: exit long position, and short sell maximum(x, max qty to short) qty
-5. LIQUIDATE: liquidate position, hold cash
+### Trade functions
+1. long: buy minimum(x, max affordable qty) qty
+2. exit_long: sell stocks to cover long position
+3. cover_and_long: cover short position, and buy minimum(x, max affordable qty) qty
+4. short: short sell maximum(x, max qty to short) qty; max qty to short = int((cash + equity value) / trade price)
+5. cover_short: buy stocks to cover short position
+6. exit_and_short: exit long position, and short sell maximum(x, max qty to short) qty
+7. liquidate: liquidate position, hold cash
 
-### Quantity
-1. ALL: maximum affordable quantity
-2. int: int quantity to buy
-3. %: 
+
 ```python
 # use this to convert % invested to corresponding signal and quantity to trade
 signal, qty = quickBacktest.convert_percent_to_qty(percentage, cur_cash, cur_qty, trade_price)
