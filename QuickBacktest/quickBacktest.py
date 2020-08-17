@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import quantstats as qs
 from QuickBacktest import yh
+from abc import ABC, abstractmethod
 
 
 class BacktestResult:
@@ -35,7 +36,8 @@ class BacktestResult:
     def stats(self):
         stats = dict()
         pv = self.result_df.set_index('datetime')['pv']
-        tk = self.result_df.set_index('datetime')['adjclose'] if 'adjclose' in self.result_df.columns else self.result_df.set_index('datetime')['close']
+        tk = self.result_df.set_index('datetime')['adjclose'] if 'adjclose' in self.result_df.columns else \
+        self.result_df.set_index('datetime')['close']
         pv = pv.resample('1D').last().dropna()
         tk = tk.resample('1D').last().dropna()
         ret = np.log(pv).diff()
@@ -98,211 +100,239 @@ class BacktestResults:
         return pd.DataFrame({'datetime': df.index, 'pv': np.dot(df, allocations)}).set_index('datetime')
 
 
-def run_backtest(df, strategy_func, capital, states, buy_at_open=True, bid_ask_spread: float = 0.0,
-                 fee_mode: str = 'FIXED:0', max_rows=None):
-    records = pd.DataFrame(columns=['cash', 'quantity'])
-    records.index.name = 'datetime'
-    trades = pd.DataFrame(columns=['trade side', 'trade price', 'trade quantity', 'trade proceeds', 'transaction fee'])
-    trades.index.name = 'datetime'
+class Strategy:
+    def __init__(self):
+        self.cash = None
+        self.quantity = None
+        self._trade_price = None
+        self._trade_datetime = None
+        self._bid_ask_spread = None
+        self._cal_fee = None
+        self._trades = None
+        self.data = None
+        self._bt_result = None
 
-    cur_qty = 0
-    cur_cash = capital
+    def init(self):
+        pass
 
-    df.columns = [x.lower() for x in df.columns]
-    df['next open'] = df['open'].shift(-1)
-    df['next datetime'] = df['datetime'].shift(-1)
-    df.reset_index(drop=True, inplace=True)
-    last_id = df.index[-1]
-    action_price_label = 'next open' if buy_at_open else 'close'
-    action_datetime = 'next datetime' if buy_at_open else 'datetime'
+    @abstractmethod
+    def signal(self):
+        pass
 
-    try:
-        mode, fee = fee_mode.split(':')
-        fee = float(fee)
-        if mode.upper() == 'FIXED':
-            def cal_fee(qty, price):
-                return fee
-        elif mode.upper() == 'QTY':
-            def cal_fee(qty, price):
-                return abs(int(qty)) * fee
-        elif mode.upper() == 'PERCENT':
-            def cal_fee(qty, price):
-                return abs(int(qty)) * price * fee
-        else:
-            raise Exception()
-
-    except Exception:
-        print(f'Invalid fee mode {fee_mode}, using zero fees')
-
-        def cal_fee(qty, price):
-            return 0.0
-
-    max_rows = df.shape[0] if max_rows is None else max_rows
-    for id, row in df.iterrows():
-        if buy_at_open:
-            records.loc[row['datetime']] = [cur_cash, cur_qty]
-
-        if (id == last_id) and buy_at_open:
-            continue
-
-        action_price = row[action_price_label]
-        action_dt = row[action_datetime]
-
-        states['cash'] = cur_cash
-        states['quantity'] = cur_qty
-        states['trade price'] = action_price
-        states['trade date'] = action_dt
-
-        partial_df = df.iloc[:id + 1].iloc[-max_rows:].copy()
-        signal, input_qty = strategy_func(df=partial_df, states=states)
-
-        signal = signal.upper()
-        input_qty = str(input_qty).upper()
-
-        if signal == 'PASS':
-            pass
-
-        elif signal == 'LONG' and cur_cash > 0:
-            action_price = action_price * (1 + bid_ask_spread)
-            max_qty = int(cur_cash / action_price)
-            bot_qty = max_qty if input_qty == 'ALL' else min(max_qty, abs(int(input_qty)))
+    def long(self, qty=None):
+        if self.cash > 0:
+            action_price = self._trade_price * (1 + self._bid_ask_spread)
+            max_qty = int(self.cash / action_price)
+            bot_qty = max_qty if qty is None else min(max_qty, abs(int(qty)))
 
             cash_proceeds = -bot_qty * action_price
-            txn_fee = cal_fee(bot_qty, action_price)
+            txn_fee = self._cal_fee(bot_qty, action_price)
+            self.cash = self.cash + cash_proceeds - txn_fee
+            self.quantity += bot_qty
 
-            cur_cash = cur_cash + cash_proceeds - txn_fee
-            cur_qty += bot_qty
+            self._trades.loc[self._trade_datetime] = ['BUY', action_price, bot_qty, cash_proceeds, txn_fee]
 
-            trades.loc[action_dt] = ['BUY', action_price, bot_qty, cash_proceeds, txn_fee]
+    def exit_long(self):
+        if self.quantity > 0:
+            action_price = self._trade_price * (1 - self._bid_ask_spread)
+            exit_qty = self.quantity
 
-        elif signal == 'EXIT LONG' and cur_qty > 0:
-            action_price = action_price * (1 - bid_ask_spread)
+            cash_proceeds = self.quantity * action_price
+            txn_fee = self._cal_fee(exit_qty, action_price)
 
-            exit_qty = cur_qty
+            self.cash = self.cash + cash_proceeds - txn_fee
+            self.quantity = 0
+            self._trades.loc[self._trade_datetime] = ['SELL', action_price, exit_qty, cash_proceeds, txn_fee]
 
-            cash_proceeds = cur_qty * action_price
-            txn_fee = cal_fee(exit_qty, action_price)
+    def short(self, qty=None):
+        action_price = self._trade_price * (1 - self._bid_ask_spread)
 
-            cur_cash = cur_cash + cash_proceeds - txn_fee
-            cur_qty = 0
-            trades.loc[action_dt] = ['SELL', action_price, exit_qty, cash_proceeds, txn_fee]
+        ev = self.quantity * action_price
+        pv = self.cash + ev
+        min_short = -int(pv / action_price)
 
-        elif signal == 'SHORT':
-            action_price = action_price * (1 - bid_ask_spread)
+        short_qty = (self.quantity - min_short) if qty is None else abs(int(qty))
+        if self.quantity - short_qty < min_short:
+            short_qty = self.quantity - min_short
 
-            ev = cur_qty * action_price
-            pv = cur_cash + ev
-            min_short = -int(pv / action_price)
+        cash_proceeds = short_qty * action_price
+        txn_fee = self._cal_fee(short_qty, action_price)
+        self.cash = self.cash + cash_proceeds - txn_fee
+        self.quantity -= short_qty
+        self._trades.loc[self._trade_datetime] = ['SELL', action_price, short_qty, cash_proceeds, txn_fee]
 
-            short_qty = (cur_qty - min_short) if input_qty == 'ALL' else abs(int(input_qty))
-            if cur_qty - short_qty < min_short:
-                short_qty = cur_qty - min_short
+    def cover_short(self):
+        if self.quantity < 0:
+            action_price = self._trade_price * (1 + self._bid_ask_spread)
 
-            cash_proceeds = short_qty * action_price
-            txn_fee = cal_fee(short_qty, action_price)
-            cur_cash = cur_cash + cash_proceeds - txn_fee
-            cur_qty -= short_qty
-            trades.loc[action_dt] = ['SELL', action_price, short_qty, cash_proceeds, txn_fee]
+            bot_qty = self.quantity * -1
 
-        elif signal == 'COVER SHORT' and cur_qty < 0:
-            action_price = action_price * (1 + bid_ask_spread)
+            cash_proceeds = self.quantity * action_price
+            txn_fee = self._cal_fee(bot_qty, action_price)
+            self.cash = self.cash + cash_proceeds - txn_fee
+            self.quantity = 0
+            self._trades.loc[self._trade_datetime] = ['BUY', action_price, bot_qty, cash_proceeds, txn_fee]
 
-            bot_qty = cur_qty * -1
+    def cover_and_long(self, qty=None):
+        if self.quantity <= 0:
+            action_price = self._trade_price * (1 + self._bid_ask_spread)
 
-            cash_proceeds = cur_qty * action_price
-            txn_fee = cal_fee(bot_qty, action_price)
-            cur_cash = cur_cash + cash_proceeds - txn_fee
-            cur_qty += bot_qty
-            trades.loc[action_dt] = ['BUY', action_price, bot_qty, cash_proceeds, txn_fee]
-
-        elif signal == 'COVER AND LONG' and cur_qty <= 0:
-            action_price = action_price * (1 + bid_ask_spread)
-
-            pv = cur_qty * action_price + cur_cash
+            pv = self.quantity * action_price + self.cash
             max_qty = int(pv / action_price)
-            long_qty = max_qty if input_qty == 'ALL' else min(max_qty, int(input_qty))
-            bot_qty = -1 * cur_qty + long_qty
+            long_qty = max_qty if qty is None else min(max_qty, int(qty))
+            bot_qty = -1 * self.quantity + long_qty
 
             cash_proceeds = -action_price * bot_qty
-            txn_fee = cal_fee(bot_qty, action_price)
+            txn_fee = self._cal_fee(bot_qty, action_price)
 
-            cur_cash = cur_cash + cash_proceeds - txn_fee
-            cur_qty += bot_qty
-            trades.loc[action_dt] = ['BUY', action_price, bot_qty, cash_proceeds, txn_fee]
+            self.cash = self.cash + cash_proceeds - txn_fee
+            self.quantity += bot_qty
+            self._trades.loc[self._trade_datetime] = ['BUY', action_price, bot_qty, cash_proceeds, txn_fee]
 
-        elif signal == 'EXIT AND SHORT' and cur_qty >= 0:
-            action_price = action_price * (1 - bid_ask_spread)
+    def exit_and_short(self, qty=None):
+        if self.quantity >= 0:
+            action_price = self._trade_price * (1 - self._bid_ask_spread)
 
-            pv = cur_qty * action_price + cur_cash
+            pv = self.quantity * action_price + self.cash
             max_qty = int(pv / action_price)
-            short_qty = max_qty if input_qty == 'ALL' else min(max_qty, abs(int(input_qty)))
-            sell_qty = -short_qty - cur_qty
+            short_qty = max_qty if qty is None else min(max_qty, abs(int(qty)))
+            sell_qty = -short_qty - self.quantity
 
             cash_proceeds = - sell_qty * action_price
-            txn_fee = cal_fee(sell_qty, action_price)
-            cur_cash = cur_cash + cash_proceeds - txn_fee
+            txn_fee = self._cal_fee(sell_qty, action_price)
+            self.cash = self.cash + cash_proceeds - txn_fee
 
-            cur_qty += sell_qty
-            trades.loc[action_dt] = ['SELL', action_price, -sell_qty, cash_proceeds, txn_fee]
+            self.quantity += sell_qty
+            self._trades.loc[self._trade_datetime] = ['SELL', action_price, -sell_qty, cash_proceeds, txn_fee]
 
-        elif signal == 'LIQUIDATE' and cur_qty != 0:
-            if cur_qty > 0:
-                action_price = action_price * (1 - bid_ask_spread)
-            else:
-                action_price = action_price * (1 + bid_ask_spread)
-
-            action_qty = -cur_qty
-            cash_proceeds = cur_qty * action_price
-
-            txn_fee = cal_fee(action_qty, action_price)
-            cur_cash = cur_cash + cash_proceeds - txn_fee
-
-            cur_qty = 0
-            trd_side = 'SELL' if action_qty < 0 else 'BUY'
-            trades.loc[action_dt] = [trd_side, action_price, abs(action_qty), cash_proceeds, txn_fee]
+    def liquidate(self):
+        if self.quantity == 0:
+            return
+        if self.quantity > 0:
+            action_price = self._trade_price * (1 - self._bid_ask_spread)
         else:
-            print(f'Invalid signal {signal} at {row["datetime"]} with qty {cur_qty}, passed without actions')
+            action_price = self._trade_price * (1 + self._bid_ask_spread)
 
-        if not buy_at_open:
-            records.loc[row['datetime']] = [cur_cash, cur_qty]
+        action_qty = -self.quantity
+        cash_proceeds = self.quantity * action_price
 
-    completed_df = df.copy()
-    completed_df = completed_df.merge(records.reset_index(), on=['datetime'], how='right')
-    completed_df['ev'] = (completed_df['quantity'] * completed_df['close']).astype(float)
-    completed_df['pv'] = (completed_df['ev'] + completed_df['cash']).astype(float)
-    completed_df['interval return'] = np.log(completed_df['pv']).diff()
-    completed_df['datetime'] = pd.to_datetime(completed_df['datetime'])
-    trades = trades.reset_index()
-    trades['datetime'] = pd.to_datetime(trades['datetime'])
-    return BacktestResult(result_df=completed_df, trade_df=trades)
+        txn_fee = self._cal_fee(action_qty, action_price)
+        self.cash = self.cash + cash_proceeds - txn_fee
 
+        self.quantity = 0
+        trd_side = 'SELL' if action_qty < 0 else 'BUY'
+        self._trades.loc[self._trade_datetime] = [trd_side, action_price, abs(action_qty), cash_proceeds, txn_fee]
 
-def backtest(tickers, strategy_func, interval='1d', init_capital=1000000, buy_at_open=True,
-             bid_ask_spread: float = 0.0,
-             fee_mode: str = 'FIXED:0', start_date=None, end_date=None,
-             max_rows=None, states: dict = None, data_params=None):
-    backtest_result_dict = dict()
-    print('Downloading data from Yahoo...')
-    dfs = yh.Stocks(tickers, param=data_params).prices()
-    for tk in tickers:
-        if tk not in dfs.keys():
-            print(f'Pass backtesting of {tk}...')
-            continue
-        df = dfs[tk]
-        if start_date:
-            df = df.loc[df['datetime'] >= start_date]
-        if end_date:
-            df = df.loc[df['datetime'] <= end_date]
+    def set_attrs(self, df):
+        for col in df.columns:
+            setattr(self, col, df[col].iloc[-1])
 
-        states_copy = dict() if states is None else states.copy()
+    def loop(self, df, capital, buy_at_open, bid_ask_spread, fee_mode):
+        records = pd.DataFrame(columns=['cash', 'quantity'])
+        records.index.name = 'datetime'
+        self._trades = pd.DataFrame(
+            columns=['trade side', 'trade price', 'trade quantity', 'trade proceeds', 'transaction fee'])
+        self._trades.index.name = 'datetime'
 
-        print(f'Backtesting {tk}...')
-        backtest_result = run_backtest(df, strategy_func=strategy_func, states=states_copy,
-                                       capital=init_capital, buy_at_open=buy_at_open, bid_ask_spread=bid_ask_spread,
-                                       fee_mode=fee_mode, max_rows=max_rows)
-        backtest_result_dict[tk] = backtest_result
-    print('Completed!')
-    return BacktestResults(backtest_results=backtest_result_dict)
+        self.quantity = 0
+        self.cash = capital
+        self._bid_ask_spread = bid_ask_spread
+
+        df = df.copy()
+        df.columns = [x.lower() for x in df.columns]
+        df['next open'] = df['open'].shift(-1)
+        df['next datetime'] = df['datetime'].shift(-1)
+        df.reset_index(drop=True, inplace=True)
+        last_id = df.index[-1]
+        action_price_label = 'next open' if buy_at_open else 'close'
+        action_datetime = 'next datetime' if buy_at_open else 'datetime'
+
+        try:
+            mode, fee = fee_mode.split(':')
+            fee = float(fee)
+            if mode.upper() == 'FIXED':
+                def cal_fee(qty, price):
+                    return fee
+            elif mode.upper() == 'QTY':
+                def cal_fee(qty, price):
+                    return abs(int(qty)) * fee
+            elif mode.upper() == 'PERCENT':
+                def cal_fee(qty, price):
+                    return abs(int(qty)) * price * fee
+            else:
+                raise Exception()
+
+        except Exception:
+            print(f'Invalid fee mode {fee_mode}, using zero fees')
+
+            def cal_fee(qty, price):
+                return 0.0
+
+        self._cal_fee = cal_fee
+
+        for id, row in df.iterrows():
+            if buy_at_open:
+                records.loc[row['datetime']] = [self.cash, self.quantity]
+
+            if (id == last_id) and buy_at_open:
+                continue
+
+            self._trade_price = row[action_price_label]
+            self._trade_datetime = row[action_datetime]
+
+            self.set_attrs(df.iloc[id:id + 1])
+            self.signal()
+
+            if not buy_at_open:
+                records.loc[row['datetime']] = [self.cash, self.quantity]
+
+        completed_df = df.copy()
+        completed_df = completed_df.merge(records.reset_index(), on=['datetime'], how='right')
+        completed_df['ev'] = (completed_df['quantity'] * completed_df['close']).astype(float)
+        completed_df['pv'] = (completed_df['ev'] + completed_df['cash']).astype(float)
+        completed_df['interval return'] = np.log(completed_df['pv']).diff()
+        completed_df['datetime'] = pd.to_datetime(completed_df['datetime'])
+        self._trades = self._trades.reset_index()
+        self._trades['datetime'] = pd.to_datetime(self._trades['datetime'])
+        return BacktestResult(result_df=completed_df, trade_df=self._trades.copy())
+
+    def backtest(self, tickers, capital=1000000, buy_at_open=True,
+                 bid_ask_spread: float = 0.0,
+                 fee_mode: str = 'FIXED:0', start_date=None, end_date=None, data_params=None):
+        bt_results = dict()
+        print('Downloading data from Yahoo...')
+        dfs = yh.Stocks(tickers, param=data_params).prices()
+        for tk in tickers:
+            if tk not in dfs.keys():
+                print(f'Pass backtesting of {tk}...')
+                continue
+            df = dfs[tk]
+            if start_date:
+                df = df.loc[df['datetime'] >= start_date]
+            if end_date:
+                df = df.loc[df['datetime'] <= end_date]
+
+            self.data = df.copy()
+            self.init()
+            self.data = self.data.dropna()
+
+            if self.data.shape[0] == 0:
+                print(f'Zero {tk} data left after init(), skipped backtesting...')
+            else:
+                print(f'Backtesting {tk}...')
+                tk_result = self.loop(df=self.data, capital=capital, buy_at_open=buy_at_open,
+                                      bid_ask_spread=bid_ask_spread,
+                                      fee_mode=fee_mode)
+                bt_results[tk] = tk_result
+        print('Completed!')
+
+        self._bt_result = BacktestResults(backtest_results=bt_results)
+
+        # clear
+        self.data = None
+        self.cash = None
+        self.quantity = None
+        return self._bt_result
 
 
 def convert_percent_to_qty(percentage, cur_cash, cur_qty, trade_price):
@@ -327,24 +357,35 @@ def convert_percent_to_qty(percentage, cur_cash, cur_qty, trade_price):
     else:
         return "SHORT", abs(action_qty)
 
+
 if __name__ == '__main__':
-
-    def sma_crossover_signal(df, states):
-        df['sma16'] = df['adjclose'].rolling(16).mean()
-        df['sma32'] = df['adjclose'].rolling(32).mean()
-        df['dif'] = df['sma16'] - df['sma32']
-        df['pre_dif'] = df['dif'].shift(1)
-        row = df.iloc[-1]
-        if row['dif'] > 0 and row['pre_dif'] <= 0:
-            return 'LONG', 'ALL'
-
-        elif row['dif'] < 0 and row['pre_dif'] >= 0:
-            return 'EXIT LONG', 'ALL'
-        else:
-            return 'PASS', ''
-
 
     tickers = ['FB', 'AMZN', 'AAPL', 'GOOG', 'NFLX', 'MDB', 'NET', 'TEAM', 'CRM']
 
-    result = backtest(tickers=tickers, strategy_func=sma_crossover_signal, start_date="2015-01-01",
-                      end_date="2020-07-31", states={'id': 0})
+
+
+    class SMA(Strategy):
+        def init(self):
+            self.data['sma16'] = self.data['adjclose'].rolling(16).mean()
+            self.data['sma32'] = self.data['adjclose'].rolling(32).mean()
+            self.data['dif'] = self.data['sma16'] - self.data['sma32']
+            self.data['pre_dif'] = self.data['dif'].shift(1)
+
+        def signal(self):
+            if self.dif > 0 and self.pre_dif <= 0:
+                self.long()
+
+            elif self.dif < 0 and self.pre_dif >= 0:
+                self.exit_long()
+            else:
+                pass
+
+
+    sma = SMA()
+    result2 = sma.backtest(tickers=tickers,
+                           capital=1000000,
+                           start_date="2014-12-01",
+                           buy_at_open=True,
+                           bid_ask_spread=0.0,
+                           fee_mode='FIXED:0',
+                           data_params={'interval': '1d', 'range': '10y'})
