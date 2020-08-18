@@ -359,34 +359,9 @@ class Strategy:
         else:
             return self.short, abs(action_qty)
 
-# def convert_percent_to_qty(percentage, cur_cash, cur_qty, trade_price):
-#     if percentage == '':
-#         return "PASS", 0
-#     ev = cur_qty * trade_price
-#     pv = cur_cash + ev
-#     try:
-#         percent = float(percentage)
-#         if percent > 1 or percent < -1:
-#             raise Exception()
-#     except Exception:
-#         print(f'Invalid % invested {percentage}, return PASS signal')
-#         return "PASS", 0
-#
-#     required_qty = int(pv * percent / trade_price)
-#     action_qty = required_qty - cur_qty
-#     if action_qty == 0:
-#         return "PASS", 0
-#     if action_qty > 0:
-#         return "LONG", action_qty
-#     else:
-#         return "SHORT", abs(action_qty)
-
-
 if __name__ == '__main__':
 
     tickers = ['FB', 'AMZN', 'AAPL', 'GOOG', 'NFLX', 'MDB', 'NET', 'TEAM', 'CRM']
-
-
 
     class SMA(Strategy):
         def init(self):
@@ -400,7 +375,7 @@ if __name__ == '__main__':
                 self.long()
 
             elif self.dif < 0 and self.pre_dif >= 0:
-                self.exit_long()
+                self.liquidate()
             else:
                 pass
 
@@ -408,8 +383,8 @@ if __name__ == '__main__':
     sma = SMA()
     result2 = sma.backtest(tickers=tickers,
                            capital=1000000,
-                           start_date="2015-01-01",
                            buy_at_open=True,
                            bid_ask_spread=0.0,
                            fee_mode='FIXED:0')
+
     result2.portfolio_report('^IXIC')

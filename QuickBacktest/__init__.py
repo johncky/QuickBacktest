@@ -1,0 +1,1 @@
+from quickBacktest import Strategy

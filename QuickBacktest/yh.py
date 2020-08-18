@@ -40,6 +40,7 @@ class Stock:
         try:
             param = param if param else self.param
             url = '{}{}'.format(self.url_v8, self.code)
+            print(url)
             data = requests.get(url, params=param).json()
             error = data['chart']['error']
             data = data['chart']['result'][0]
