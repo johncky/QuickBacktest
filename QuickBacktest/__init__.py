@@ -1,1 +1,1 @@
-from quickBacktest import Strategy
+from QuickBacktest.quickBacktest import Strategy
