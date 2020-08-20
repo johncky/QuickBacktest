@@ -25,6 +25,8 @@ Automatically download data from Yahoo Finance, backtest strategy, and produce p
 
 
     sma = SMA()
+    tickers = ('FB', 'AMZN', 'AAPL', 'GOOG', 'NFLX', 'MDB', 'NET', 'TEAM', 'CRM')
+
     result = sma.backtest(tickers=tickers,
                            capital=1000000,
                            start_date="2015-01-01",
