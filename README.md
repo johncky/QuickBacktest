@@ -1,6 +1,7 @@
 # QuickBacktest
 
-Backtest technical indicators based trading strategies.
+Backtest trading strategies on multiple tickers at once.
+
 Automatically download data from Yahoo Finance, backtest strategy, and produce performance statistics and report.
 
 # Example
