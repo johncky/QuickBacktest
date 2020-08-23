@@ -361,7 +361,7 @@ class Strategy:
 
 if __name__ == '__main__':
 
-    tickers = ['FB', 'AMZN', 'AAPL', 'GOOG', 'NFLX', 'MDB', 'NET', 'TEAM', 'CRM']
+    tickers = ['0700.HK']
 
     class SMA(Strategy):
         def init(self):
@@ -382,9 +382,10 @@ if __name__ == '__main__':
 
     sma = SMA()
     result2 = sma.backtest(tickers=tickers,
-                           capital=1000000,
+                           capital=200000,
                            buy_at_open=True,
                            bid_ask_spread=0.0,
-                           fee_mode='FIXED:0')
+                           fee_mode='FIXED:0',
+                           start_date='2015-01-01')
 
-    result2.portfolio_report('^IXIC')
+    result2.portfolio_report('0700.HK')

@@ -5,7 +5,7 @@ Automatically download data from Yahoo Finance, backtest strategy, and produce p
 
 # Example
 ```python
-    from quickBacktest import Strategy
+    from QuickBacktest.quickBacktest import Strategy
     
     class SMA(Strategy):
         def init(self):
