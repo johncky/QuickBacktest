@@ -1,1 +1,2 @@
 from QuickBacktest.quickBacktest import Strategy
+from QuickBacktest.result import BacktestResult, BacktestResults
